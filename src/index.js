@@ -22,9 +22,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Railway injects DATABASE_URL automatically once Postgres is linked.
+// SSL is only enabled when explicitly requested via PGSSLMODE, since
+// Railway's internal private networking (the default for a linked DB)
+// doesn't use/support TLS — forcing SSL there breaks the connection.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+  ssl: process.env.PGSSLMODE === "require" ? { rejectUnauthorized: false } : false,
 });
 
 // Open CORS — this is meant to be freely usable by any app/website.
