@@ -27,6 +27,7 @@ const PORT = process.env.PORT || 3000;
 // Postgres plugin) doesn't support SSL on its internal private network
 // connection at all — so we override the pg library's default behavior
 // of reading PGSSLMODE, rather than letting it silently re-enable SSL.
+// (build-marker: force-rebuild-2)
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: false,
