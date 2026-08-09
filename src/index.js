@@ -91,6 +91,41 @@ app.delete("/kv/:key", async (req, res) => {
   }
 });
 
+// ---------------- Search ----------------
+// Finds account keys (user:<subdomain>:<username>) where the username
+// portion partially matches the query, across ALL subdomains. Used so
+// searching "matrix" finds every account with "matrix" in the username,
+// not just an exact "name@subdomain" match.
+
+app.get("/search", async (req, res) => {
+  const q = (req.query.q || "").toString().trim().toLowerCase();
+  if (!q) return res.status(200).json({ results: [] });
+
+  try {
+    // Keys look like: user:<subdomain>:<username>
+    // Match if the username portion (after the second colon) contains q.
+    const result = await pool.query(
+      `SELECT key FROM kv_store
+       WHERE key LIKE 'user:%'
+       AND split_part(key, ':', 3) LIKE $1
+       LIMIT 20`,
+      [`%${q}%`]
+    );
+
+    const identities = result.rows.map((row) => {
+      const parts = row.key.split(":");
+      const subdomain = parts[1];
+      const username = parts.slice(2).join(":"); // in case username ever contains ':'
+      return `${username}@${subdomain}`;
+    });
+
+    res.status(200).json({ results: identities });
+  } catch (err) {
+    console.error("GET /search error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---------------- Status / info pages ----------------
 
 app.get("/rryyt", async (req, res) => {
