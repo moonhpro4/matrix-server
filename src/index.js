@@ -35,7 +35,7 @@ const pool = new Pool({
 
 // Open CORS — this is meant to be freely usable by any app/website.
 app.use(cors());
-app.use(express.text({ type: "*/*", limit: "500mb" }));
+app.use(express.text({ type: "*/*", limit: "1gb" }));
 
 let dbReady = false;
 
