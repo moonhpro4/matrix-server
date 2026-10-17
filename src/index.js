@@ -10,6 +10,9 @@
  *   GET    /kv/:key    -> 200 with raw value, or 404 if not found
  *   PUT    /kv/:key    -> stores the raw request body as the value
  *   DELETE /kv/:key    -> deletes the key
+ *   GET    /search?q=  -> find accounts by partial username
+ *   POST   /files/init (+ /files/:id/complete, GET/DELETE /files/:id)
+ *                      -> large file storage via presigned URLs (see files.js)
  *   GET    /rryyt      -> live status page for the real running backend
  *   GET    /           -> basic info page
  */
@@ -17,25 +20,40 @@
 const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
+const { createFilesRouter, storageConfigured, MAX_FILE_BYTES } = require("./files");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Railway injects DATABASE_URL automatically once Postgres is linked.
-// SSL is force-disabled here: Railway sets PGSSLMODE=require platform-wide
-// as an env var, but this raw Postgres image (not Railway's managed
-// Postgres plugin) doesn't support SSL on its internal private network
-// connection at all — so we override the pg library's default behavior
-// of reading PGSSLMODE, rather than letting it silently re-enable SSL.
-// (build-marker: force-rebuild-2)
+// Behind Render's proxy: needed so req.ip is the real client IP.
+app.set("trust proxy", 1);
+
+// Database SSL is controlled explicitly (never by the PGSSLMODE env var):
+//   DB_SSL=true   -> use SSL (Neon, Supabase, Render's *external* DB URL)
+//   anything else -> no SSL (Render/Railway *internal* DB URLs, local dev)
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: false,
+  ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
+  max: 10,
+});
+
+// Hosted Postgres drops idle connections. Without this handler an idle
+// disconnect emits an unhandled 'error' event and crashes the process.
+pool.on("error", (err) => {
+  console.error("Idle Postgres client error (ignored, pool will reconnect):", err.message);
 });
 
 // Open CORS — this is meant to be freely usable by any app/website.
 app.use(cors());
-app.use(express.text({ type: "*/*", limit: "1gb" }));
+
+// File uploads/downloads go straight to object storage (see files.js),
+// so they never pass through this server's memory.
+app.use("/files", createFilesRouter(pool));
+
+// The plain key-value API holds whole values in RAM, so keep its cap
+// modest (a 512 MB free host cannot buffer a 1 GB body). Raise it only
+// if you run on a bigger instance.
+app.use(express.text({ type: "*/*", limit: process.env.KV_BODY_LIMIT || "50mb" }));
 
 let dbReady = false;
 
@@ -145,6 +163,8 @@ app.get("/rryyt", async (req, res) => {
     dbReady,
     dbConnected,
     keyCount,
+    fileStorageConfigured: storageConfigured(),
+    maxFileBytes: MAX_FILE_BYTES,
     uptimeSeconds: Math.floor(process.uptime()),
     poweredBy: "https://github.com/moonhpro4/matrix-server",
     usedBy: "https://github.com/moonhpro4/matrix-messenger",
@@ -156,16 +176,31 @@ app.get("/", (req, res) => {
     name: "matrix-server",
     description:
       "Open-source, free, unlimited key-value backend. Originally built for Matrix Messenger, free to reuse for anything.",
-    endpoints: ["GET /kv/:key", "PUT /kv/:key", "DELETE /kv/:key", "GET /rryyt"],
+    endpoints: [
+      "GET /kv/:key",
+      "PUT /kv/:key",
+      "DELETE /kv/:key",
+      "GET /search?q=",
+      "POST /files/init",
+      "POST /files/:id/complete",
+      "GET /files/:id",
+      "GET /files/:id/download",
+      "DELETE /files/:id",
+      "GET /rryyt",
+    ],
     source: "https://github.com/moonhpro4/matrix-server",
   });
 });
 
 app.listen(PORT, async () => {
   console.log(`matrix-server listening on port ${PORT}`);
-  try {
-    await initDb();
-  } catch (err) {
-    console.error("Failed to initialize database:", err);
+  // Retry: on free hosts the database can take a moment to wake up.
+  for (let attempt = 1; !dbReady; attempt++) {
+    try {
+      await initDb();
+    } catch (err) {
+      console.error(`Failed to initialize database (attempt ${attempt}):`, err.message);
+      await new Promise((r) => setTimeout(r, Math.min(30000, attempt * 3000)));
+    }
   }
 });

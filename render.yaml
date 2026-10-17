@@ -1,0 +1,32 @@
+# Render Blueprint for matrix-server.
+# Render dashboard -> New -> Blueprint -> pick this repo.
+# Every `sync: false` value is asked for once during setup (never stored in git).
+services:
+  - type: web
+    name: matrix-server
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /rryyt
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Postgres connection string (Neon / Supabase / Render Postgres).
+      - key: DATABASE_URL
+        sync: false
+      # "true" for Neon / Supabase / Render's external URL, "false" for Render's internal URL.
+      - key: DB_SSL
+        value: "true"
+      # S3-compatible bucket for files (Cloudflare R2 recommended).
+      - key: S3_ENDPOINT        # https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_REGION
+        value: auto
